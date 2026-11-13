@@ -15,7 +15,8 @@ Gray Swan Arena Chat Extractor helps AI security researchers and red-teamers syn
 
 Features:
 - Universal auto-detection across all Gray Swan Arena challenges, automatically loading challenge names, scenarios, models, and live registered break counts from your active session.
-- Deduplicated scenario and model filter dropdowns synchronized with the live challenge roster so batch and single-turn chats group cleanly.
+- Hierarchical **Sorted** export toggle in both the in-page floating widget and toolbar popup: automatically organizes ZIP exports into clean `<Scenario>/<Model>/<Status>` directories (`Accepted`, `Rejected`, `Submission Pending`, `Submission Failed`).
+- Multi-select **Status** (`All`, `Accepted`, `Pending`, `Rejected`, `Submission failed`), **Scenario**, and **Model** checkbox filter dropdowns synchronized with the live challenge roster so batch and single-turn chats group cleanly.
 - Outcome classification across rejected attempts, accepted breaks (including appeals), pending autogrades, and submission errors.
 - Per-challenge storage isolation so navigating between challenges keeps metrics and cached logs strictly scoped to the active challenge.
 - Built-in conversation inspector displaying multi-turn messages, tool call summaries, reasoning traces, and classification signals.
