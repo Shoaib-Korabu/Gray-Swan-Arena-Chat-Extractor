@@ -365,6 +365,108 @@ section('Challenge name, backward-compat seed, timestamps, ZIP, filters');
 
   const unionScen = normalizer.collectScenarios([{ scenario: 'S2' }], ['S1', 'S2', 'S3']);
   ok('collectScenarios unions roster + chats without duplicates', JSON.stringify(unionScen) === JSON.stringify(['S1', 'S2', 'S3']), JSON.stringify(unionScen));
+
+  // Multi-select Status / Scenario / Model filtering & Submission failed label
+  const sampleChats = [
+    { chatId: '1', scenario: 'S1', model: 'M1', rejectionDetails: { outcome: 'accepted', isRejected: false } },
+    { chatId: '2', scenario: 'S1', model: 'M2', rejectionDetails: { outcome: 'rejected', isRejected: true } },
+    { chatId: '3', scenario: 'S2', model: 'M1', rejectionDetails: { outcome: 'error', isRejected: true } },
+    { chatId: '4', scenario: 'S3', model: 'M3', rejectionDetails: { outcome: 'pending', isRejected: false } }
+  ];
+  ok('outcomeOf preserves error even when isRejected=true (abandoned/sub failed)', normalizer.outcomeOf(sampleChats[2]) === 'error');
+  ok('outcomeLabel("error") == "Submission failed"', normalizer.outcomeLabel('error') === 'Submission failed');
+  ok('filterChats empty Sets = All', normalizer.filterChats(sampleChats, { outcomes: new Set(), scenarios: new Set(), models: new Set() }).length === 4);
+  ok('filterChats multi-select outcomes (rejected + error)', normalizer.filterChats(sampleChats, { outcomes: new Set(['rejected', 'error']) }).map(c => c.chatId).join(',') === '2,3');
+  ok('filterChats multi-select scenarios + models', normalizer.filterChats(sampleChats, { scenarios: new Set(['S1', 'S2']), models: new Set(['M1']) }).map(c => c.chatId).join(',') === '1,3');
+}
+
+// ---------------------------------------------------------------------------
+section('Sorted ZIP export by Scenario / Model / Status (<Scenario>/<Model>/<Outcome>)');
+{
+  const {
+    sanitizePathSegment,
+    getSortedOutcomeFolder,
+    generateChatZipPath,
+    buildChatZipFiles
+  } = normalizer;
+
+  ok('sanitizePathSegment cleans newlines & trailing spaces', sanitizePathSegment('Exploit the System to Get Lots of Money\n\n') === 'Exploit the System to Get Lots of Money');
+  ok('sanitizePathSegment strips leading ?', sanitizePathSegment('?Electric Giraffe Galactic') === 'Electric Giraffe Galactic');
+  ok('sanitizePathSegment turns colon into dash', sanitizePathSegment('WB1S5: Validation-bypass') === 'WB1S5 - Validation-bypass');
+  ok('sanitizePathSegment protects reserved Windows device names', sanitizePathSegment('nul') === 'nul_');
+  ok('sanitizePathSegment fallback for empty string', sanitizePathSegment('', 'Default Folder') === 'Default Folder');
+
+  ok('getSortedOutcomeFolder maps accepted', getSortedOutcomeFolder('accepted') === 'Accepted');
+  ok('getSortedOutcomeFolder maps rejected', getSortedOutcomeFolder('rejected') === 'Rejected');
+  ok('getSortedOutcomeFolder maps pending to Submission Pending', getSortedOutcomeFolder('pending') === 'Submission Pending');
+  ok('getSortedOutcomeFolder maps error to Submission Failed', getSortedOutcomeFolder('error') === 'Submission Failed');
+  ok('getSortedOutcomeFolder fallback to Other', getSortedOutcomeFolder('unknown_xyz') === 'Other');
+
+  const chatA = {
+    chatId: '6af318ece6b75ac9d31e63b7',
+    scenario: 'Exploit the System to Get Lots of Money\n\n',
+    model: '?Electric Giraffe Galactic',
+    challenge: { slug: 'lucky-break-payday', name: 'Lucky Break: Payday' },
+    createdAt: '2026-11-13T10:19:56.650Z',
+    rejectionDetails: { outcome: 'accepted', isRejected: false }
+  };
+  const chatB = {
+    chatId: '7bf429fdf7c86bd0e42f74c8',
+    scenario: 'Exploit the System to Get Lots of Money',
+    model: 'Ghost Fox Rare',
+    challenge: { slug: 'lucky-break-payday', name: 'Lucky Break: Payday' },
+    createdAt: '2026-11-13T10:20:00.000Z',
+    rejectionDetails: { outcome: 'rejected', isRejected: true }
+  };
+  const chatC = {
+    chatId: '8cf53a0ef8d97ce1f53a85d9',
+    scenario: 'Get Free Money Scamming a Retail Bot',
+    model: 'Shadow Trout Mega',
+    challenge: { slug: 'lucky-break-payday', name: 'Lucky Break: Payday' },
+    createdAt: '2026-11-13T10:25:00.000Z',
+    rejectionDetails: { outcome: 'pending', isRejected: false }
+  };
+  const chatD = {
+    chatId: '9df64b1fa9e08df2a64b96ea',
+    scenario: 'Identity Theft Hack',
+    model: 'Emerald Zebra Cosmic',
+    challenge: { slug: 'lucky-break-payday', name: 'Lucky Break: Payday' },
+    createdAt: '2026-11-13T10:30:00.000Z',
+    rejectionDetails: { outcome: 'error', isRejected: true }
+  };
+
+  const pathA = generateChatZipPath(chatA, true);
+  ok('generateChatZipPath sorted formats <Scenario>/<Model>/<Outcome>/<filename.json>',
+    pathA.startsWith('Exploit the System to Get Lots of Money/Electric Giraffe Galactic/Accepted/chat-lucky-break-payday-') && pathA.endsWith('.json'),
+    pathA
+  );
+
+  const flatPath = generateChatZipPath(chatA, false);
+  ok('generateChatZipPath unsorted is flat filename', !flatPath.includes('/'), flatPath);
+
+  const zipFiles = buildChatZipFiles([chatA, chatB, chatC, chatD], {
+    slug: 'lucky-break-payday',
+    name: 'Lucky Break: Payday',
+    isSorted: true
+  });
+  ok('buildChatZipFiles returns 4 chat files + manifest.json', zipFiles.length === 5);
+  ok('zipFiles includes root manifest.json', zipFiles.some(f => f.name === 'manifest.json'));
+
+  const manifest = JSON.parse(zipFiles.find(f => f.name === 'manifest.json').data);
+  ok('manifest marks sorted: true', manifest.sorted === true && manifest.count === 4);
+  ok('manifest files list relative zip paths', manifest.files[0].file.includes('/Accepted/'));
+
+  // Binary ZIP generation & verification
+  const archiveBytes = zip.createZipArchive(zipFiles);
+  ok('createZipArchive packages sorted files without error', archiveBytes.length > 500);
+
+  const zipNamings = zipFiles.map(f => f.name);
+  ok('all 4 outcome folders represented in zip entries',
+    zipNamings.some(n => n.includes('/Accepted/')) &&
+    zipNamings.some(n => n.includes('/Rejected/')) &&
+    zipNamings.some(n => n.includes('/Submission Pending/')) &&
+    zipNamings.some(n => n.includes('/Submission Failed/'))
+  );
 }
 
 // ---------------------------------------------------------------------------
