@@ -5,6 +5,13 @@
 (function () {
   'use strict';
 
+  const STATUS_OPTIONS = [
+    { value: 'accepted', label: 'Accepted' },
+    { value: 'pending', label: 'Pending' },
+    { value: 'rejected', label: 'Rejected' },
+    { value: 'error', label: 'Submission failed' }
+  ];
+
   const state = {
     slug: '',
     challengeName: '',
@@ -15,21 +22,24 @@
     rosterScenarios: [],
     breakStats: null,
     serverTotals: null,
-    filters: { outcome: 'all', scenario: 'all', model: 'all', search: '' },
+    filters: {
+      outcomes: new Set(),
+      scenarios: new Set(),
+      models: new Set(),
+      search: ''
+    },
+    menuSearch: { scenario: '', model: '' },
+    openMenu: null,
     selected: new Set(),
+    isSorted: true,
     extracting: false
   };
 
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const keyOf = (c, i) => c && c.chatId ? `id:${c.chatId}` : `idx:${i}`;
-  const outcomeOf = (c) => {
-    const o = c?.rejectionDetails?.outcome;
-    if (o === 'rejected' || c?.rejectionDetails?.isRejected) return 'rejected';
-    if (o === 'accepted') return 'accepted';
-    if (o === 'error') return 'error';
-    return 'pending';
-  };
+  const outcomeOf = (c) => GSANormalizer.outcomeOf(c);
+  const outcomeLabel = (oc) => GSANormalizer.outcomeLabel(oc);
 
   function toast(msg, kind = 'info') {
     const el = document.createElement('div');
@@ -69,7 +79,13 @@
     state.breakStats = null;
     state.serverTotals = null;
     state.selected.clear();
-    state.filters = { outcome: 'all', scenario: 'all', model: 'all', search: '' };
+    state.filters.outcomes.clear();
+    state.filters.scenarios.clear();
+    state.filters.models.clear();
+    state.filters.search = '';
+    state.menuSearch.scenario = '';
+    state.menuSearch.model = '';
+    closeAllMenus();
     $('searchInput').value = '';
     $('btnClearSearch').classList.add('hidden');
 
@@ -248,61 +264,213 @@
     $('statErrorCount').textContent = counts.error;
     $('statPendingCount').textContent = counts.pending;
     document.querySelectorAll('.stat-card').forEach(card => {
-      card.classList.toggle('active', card.dataset.outcome === state.filters.outcome);
+      const oc = card.dataset.outcome;
+      const active = oc === 'all' ? state.filters.outcomes.size === 0 : state.filters.outcomes.has(oc);
+      card.classList.toggle('active', active);
     });
+    return counts;
   }
 
-  function renderFilters() {
-    const scenarios = GSANormalizer.collectScenarios(state.chats, state.rosterScenarios);
-    const models = GSANormalizer.collectModels(state.chats, state.rosterModels);
-
+  function buildDropdownMeta() {
+    const outcomeCounts = { accepted: 0, pending: 0, rejected: 0, error: 0 };
     const scenCounts = {};
     const modCounts = {};
     for (const c of state.chats) {
+      outcomeCounts[outcomeOf(c)]++;
       if (c.scenario) scenCounts[c.scenario] = (scenCounts[c.scenario] || 0) + 1;
       if (c.model) modCounts[c.model] = (modCounts[c.model] || 0) + 1;
     }
 
+    const scenarios = GSANormalizer.collectScenarios(state.chats, state.rosterScenarios);
+    const models = GSANormalizer.collectModels(state.chats, state.rosterModels);
+
+    for (const s of [...state.filters.scenarios]) {
+      if (!scenarios.includes(s)) state.filters.scenarios.delete(s);
+    }
+    for (const m of [...state.filters.models]) {
+      if (!models.includes(m)) state.filters.models.delete(m);
+    }
+
     const solvedIds = new Set(state.breakStats?.solvedBehaviors || []);
-    const scenLabels = {};
+    const brokenScenarios = new Set();
     for (const c of state.chats) {
-      if (c.scenario && c.behaviorId && solvedIds.has(c.behaviorId)) {
-        scenLabels[c.scenario] = ' [broken]';
+      if (c.scenario && c.behaviorId && solvedIds.has(c.behaviorId)) brokenScenarios.add(c.scenario);
+    }
+
+    return {
+      status: {
+        btnId: 'btnDdStatus', lblId: 'lblDdStatus', menuId: 'menuDdStatus',
+        title: 'Status', selectedSet: state.filters.outcomes, searchable: false,
+        options: STATUS_OPTIONS.map(o => ({
+          value: o.value,
+          label: o.label,
+          count: state.chats.length ? outcomeCounts[o.value] : null
+        }))
+      },
+      scenario: {
+        btnId: 'btnDdScenario', lblId: 'lblDdScenario', menuId: 'menuDdScenario',
+        title: 'Scenario', selectedSet: state.filters.scenarios, searchable: scenarios.length > 5,
+        options: scenarios.map(s => ({
+          value: s,
+          label: s,
+          tag: brokenScenarios.has(s) ? 'broken' : '',
+          count: scenCounts[s] ?? null
+        }))
+      },
+      model: {
+        btnId: 'btnDdModel', lblId: 'lblDdModel', menuId: 'menuDdModel',
+        title: 'Model', selectedSet: state.filters.models, searchable: models.length > 5,
+        options: models.map(m => ({
+          value: m,
+          label: m,
+          count: modCounts[m] ?? null
+        }))
+      }
+    };
+  }
+
+  function updateDropdownTrigger(cfg) {
+    const btn = $(cfg.btnId);
+    const lbl = $(cfg.lblId);
+    const size = cfg.selectedSet.size;
+    if (size === 0) {
+      lbl.textContent = cfg.title;
+      btn.title = `${cfg.title}: All`;
+    } else if (size === 1) {
+      const only = [...cfg.selectedSet][0];
+      const match = cfg.options.find(o => o.value === only);
+      const text = match ? match.label : only;
+      lbl.textContent = text;
+      btn.title = `${cfg.title}: ${text}`;
+    } else {
+      lbl.textContent = `${cfg.title} (${size})`;
+      btn.title = `${cfg.title}: ${size} selected`;
+    }
+    btn.classList.toggle('has-selection', size > 0);
+  }
+
+  function renderMenuOptions(kind, cfg, optsWrap) {
+    const q = (state.menuSearch[kind] || '').trim().toLowerCase();
+    const visible = q
+      ? cfg.options.filter(o => o.label.toLowerCase().includes(q))
+      : cfg.options;
+    const allChecked = cfg.selectedSet.size === 0;
+
+    const rows = [];
+    if (!q) {
+      rows.push(`
+        <label class="multi-opt${allChecked ? ' is-checked' : ''}" data-value="__all__">
+          <input type="checkbox" class="multi-opt-cb"${allChecked ? ' checked' : ''}>
+          <span class="multi-box"></span>
+          <span class="multi-opt-label">All</span>
+        </label>`);
+    }
+
+    if (visible.length === 0) {
+      rows.push(`<div class="multi-empty">No matches</div>`);
+    } else {
+      for (const o of visible) {
+        const checked = cfg.selectedSet.has(o.value);
+        rows.push(`
+          <label class="multi-opt${checked ? ' is-checked' : ''}" data-value="${esc(o.value)}" title="${esc(o.label)}">
+            <input type="checkbox" class="multi-opt-cb"${checked ? ' checked' : ''}>
+            <span class="multi-box"></span>
+            <span class="multi-opt-label">${esc(o.label)}</span>
+            ${o.tag ? `<span class="multi-opt-tag">${esc(o.tag)}</span>` : ''}
+            ${typeof o.count === 'number' ? `<span class="multi-opt-cnt">${o.count}</span>` : ''}
+          </label>`);
       }
     }
 
-    fillSelect($('scenarioSelect'), scenarios, state.filters.scenario, 'All scenarios', scenCounts, scenLabels);
-    fillSelect($('modelSelect'), models, state.filters.model, 'All models', modCounts);
+    optsWrap.innerHTML = rows.join('');
+    optsWrap.querySelectorAll('.multi-opt-cb').forEach(cb => {
+      cb.addEventListener('change', () => {
+        const val = cb.closest('.multi-opt').dataset.value;
+        if (val === '__all__') {
+          cfg.selectedSet.clear();
+        } else if (cb.checked) {
+          cfg.selectedSet.add(val);
+        } else {
+          cfg.selectedSet.delete(val);
+        }
+        renderMenuOptions(kind, cfg, optsWrap);
+        updateDropdownTrigger(cfg);
+        if (kind === 'status') renderStats();
+        renderList();
+        updateDownloadButton();
+      });
+    });
   }
 
-  function fillSelect(sel, values, current, allLabel, countsMap = {}, tagsMap = {}) {
-    const prev = current && values.includes(current) ? current : 'all';
-    state.filters[sel === $('scenarioSelect') ? 'scenario' : 'model'] = prev;
-    sel.innerHTML = `<option value="all">${esc(allLabel)} (${values.length})</option>` +
-      values.map(v => {
-        const cnt = countsMap[v];
-        const tag = tagsMap[v] || '';
-        const suffix = (cnt ? ` (${cnt})` : '') + tag;
-        return `<option value="${esc(v)}"${v === prev ? ' selected' : ''}>${esc(v + suffix)}</option>`;
-      }).join('');
+  function renderDropdown(kind, cfg) {
+    const menu = $(cfg.menuId);
+    updateDropdownTrigger(cfg);
+
+    let searchWrap = menu.querySelector('.multi-search-wrap');
+    let optsWrap = menu.querySelector('.multi-opts');
+
+    if (!optsWrap || Boolean(searchWrap) !== cfg.searchable) {
+      menu.innerHTML = (cfg.searchable
+        ? `<div class="multi-search-wrap"><input type="text" class="multi-search" placeholder="Filter ${esc(cfg.title.toLowerCase())}..." spellcheck="false"></div>`
+        : '') + `<div class="multi-opts"></div>`;
+      optsWrap = menu.querySelector('.multi-opts');
+      const searchInput = menu.querySelector('.multi-search');
+      if (searchInput) {
+        searchInput.value = state.menuSearch[kind] || '';
+        searchInput.addEventListener('input', (e) => {
+          state.menuSearch[kind] = e.target.value;
+          const fresh = buildDropdownMeta()[kind];
+          renderMenuOptions(kind, fresh, optsWrap);
+        });
+      }
+    } else {
+      const searchInput = menu.querySelector('.multi-search');
+      if (searchInput && searchInput.value !== (state.menuSearch[kind] || '')) {
+        searchInput.value = state.menuSearch[kind] || '';
+      }
+    }
+
+    renderMenuOptions(kind, cfg, optsWrap);
+  }
+
+  function renderFilters() {
+    const cfgs = buildDropdownMeta();
+    renderDropdown('status', cfgs.status);
+    renderDropdown('scenario', cfgs.scenario);
+    renderDropdown('model', cfgs.model);
+  }
+
+  function closeAllMenus() {
+    state.openMenu = null;
+    for (const [btnId, menuId] of [
+      ['btnDdStatus', 'menuDdStatus'],
+      ['btnDdScenario', 'menuDdScenario'],
+      ['btnDdModel', 'menuDdModel']
+    ]) {
+      const btn = $(btnId);
+      const menu = $(menuId);
+      if (btn) { btn.classList.remove('open'); btn.setAttribute('aria-expanded', 'false'); }
+      if (menu) menu.classList.add('hidden');
+    }
+  }
+
+  function toggleMenu(kind) {
+    const next = state.openMenu === kind ? null : kind;
+    closeAllMenus();
+    if (!next) return;
+    state.openMenu = next;
+    const cap = next.charAt(0).toUpperCase() + next.slice(1);
+    const btn = $('btnDd' + cap);
+    const menu = $('menuDd' + cap);
+    btn.classList.add('open');
+    btn.setAttribute('aria-expanded', 'true');
+    menu.classList.remove('hidden');
+    const searchInput = menu.querySelector('.multi-search');
+    if (searchInput) searchInput.focus();
   }
 
   function getFiltered() {
-    const f = state.filters;
-    const q = f.search.toLowerCase();
-    return state.chats.filter(c => {
-      if (f.outcome !== 'all' && outcomeOf(c) !== f.outcome) return false;
-      if (f.scenario !== 'all' && c.scenario !== f.scenario) return false;
-      if (f.model !== 'all' && c.model !== f.model) return false;
-      if (q) {
-        const hay = [
-          c.model, c.scenario, c.behaviorId, c.title, c.chatId, c.rejectionDetails?.reason,
-          ...(c.messages || []).map(m => `${m.content || ''} ${m.toolCallSummary || ''}`)
-        ].join(' ').toLowerCase();
-        if (!hay.includes(q)) return false;
-      }
-      return true;
-    });
+    return GSANormalizer.filterChats(state.chats, state.filters);
   }
 
   function getDownloadTarget() {
@@ -339,7 +507,7 @@
           <div class="chat-row-body" data-key="${esc(c._key)}">
             <div class="chat-row-top">
               <span class="chat-model">${esc(c.model)}</span>
-              <span class="outcome-pill pill-${oc}">${oc}</span>
+              <span class="outcome-pill pill-${oc}">${esc(outcomeLabel(oc))}</span>
             </div>
             <div class="chat-scenario">${esc(c.scenario)}</div>
             <div class="chat-title">${esc(title.slice(0, 140))}</div>
@@ -380,11 +548,19 @@
     const n = getDownloadTarget().length;
     $('downloadCount').textContent = `(${n})`;
     $('btnDownload').disabled = n === 0;
-    $('downloadHint').textContent = n === 1
-      ? 'Downloads as a single .json file.'
-      : n > 1
-        ? `Downloads as a .zip of ${n} JSON files. No 10-chat cap.`
-        : 'Select chats or adjust filters to choose what to download.';
+    const txt = $('btnDownloadText');
+    if (txt) {
+      if (state.isSorted) {
+        txt.textContent = 'Download Sorted ZIP';
+      } else {
+        txt.textContent = n === 1 ? 'Download JSON' : 'Download ZIP';
+      }
+    }
+    $('downloadHint').innerHTML = state.isSorted
+      ? `Downloads as a <code>.zip</code> organized into <code>&lt;Scenario&gt;/&lt;Model&gt;/&lt;Status&gt;</code> subfolders.`
+      : (n === 1
+        ? 'Downloads as a single <code>.json</code> file.'
+        : `Downloads as a flat <code>.zip</code> of ${n} JSON files. No 10-chat cap.`);
   }
 
   // ---- Download (single JSON, or ZIP of JSON files) --------------------
@@ -402,7 +578,7 @@
     const ts = GSANormalizer.formatTimestampCompact(new Date());
     const slug = (effectiveSlug() || 'challenge').replace(/[^a-zA-Z0-9_-]/g, '_');
 
-    if (target.length === 1) {
+    if (target.length === 1 && !state.isSorted) {
       const c = target[0];
       const blob = new Blob([JSON.stringify(c, null, 2)], { type: 'application/json' });
       triggerBlobDownload(blob, GSANormalizer.generateChatFilename(c));
@@ -410,37 +586,33 @@
       return;
     }
 
-    const files = target.map(c => ({ name: GSANormalizer.generateChatFilename(c), data: JSON.stringify(c, null, 2) }));
-    const manifest = {
-      formatVersion: 1,
-      challenge: { slug: effectiveSlug(), name: state.challengeName },
+    const files = GSANormalizer.buildChatZipFiles(target, {
+      slug: effectiveSlug(),
+      name: state.challengeName,
       breakStats: state.breakStats || undefined,
-      exportedAt: new Date().toISOString(),
-      count: target.length,
-      files: files.map((f, i) => ({
-        file: f.name,
-        chatId: target[i].chatId,
-        model: target[i].model,
-        scenario: target[i].scenario,
-        outcome: outcomeOf(target[i])
-      }))
-    };
-    files.push({ name: 'manifest.json', data: JSON.stringify(manifest, null, 2) });
+      isSorted: state.isSorted
+    });
 
     const blob = GSAZip.createZipBlob(files);
-    triggerBlobDownload(blob, `gsa-${slug}-chats-${target.length}-${ts}.zip`);
-    toast(`Downloaded ${target.length} JSON files in a ZIP.`, 'success');
+    const zipName = state.isSorted
+      ? `gsa-${slug}-chats-sorted-${target.length}-${ts}.zip`
+      : `gsa-${slug}-chats-${target.length}-${ts}.zip`;
+    triggerBlobDownload(blob, zipName);
+    toast(state.isSorted
+      ? `Downloaded ${target.length} chats in sorted ZIP.`
+      : `Downloaded ${target.length} JSON files in a ZIP.`, 'success');
   }
 
   // ---- Inspector -------------------------------------------------------
   let inspectChat = null;
   function openInspector(c) {
     inspectChat = c;
+    const oc = outcomeOf(c);
     $('modalTitle').textContent = c.scenario || 'Conversation';
-    $('modalScenario').textContent = outcomeOf(c);
-    $('modalScenario').className = `modal-scenario-tag pill-${outcomeOf(c)}`;
+    $('modalScenario').textContent = outcomeLabel(oc);
+    $('modalScenario').className = `modal-scenario-tag pill-${oc}`;
     $('modalModel').textContent = c.model;
-    $('modalStatusBadge').textContent = c.rejectionDetails?.outcome || 'unknown';
+    $('modalStatusBadge').textContent = outcomeLabel(oc);
     $('modalChatId').textContent = c.chatId || '(none)';
 
     $('modalDialogue').innerHTML = (c.messages || []).map(m => {
@@ -505,14 +677,39 @@
     });
 
     document.querySelectorAll('.stat-card').forEach(card => {
-      card.addEventListener('click', () => {
-        state.filters.outcome = card.dataset.outcome;
-        renderStats(); renderList(); updateDownloadButton();
+      card.addEventListener('click', (e) => {
+        const oc = card.dataset.outcome;
+        const outcomes = state.filters.outcomes;
+        if (oc === 'all') {
+          outcomes.clear();
+        } else if (e.shiftKey || e.ctrlKey || e.metaKey) {
+          if (outcomes.has(oc)) outcomes.delete(oc);
+          else outcomes.add(oc);
+        } else if (outcomes.size === 1 && outcomes.has(oc)) {
+          outcomes.clear();
+        } else {
+          outcomes.clear();
+          outcomes.add(oc);
+        }
+        renderStats();
+        renderDropdown('status', buildDropdownMeta().status);
+        renderList();
+        updateDownloadButton();
       });
     });
 
-    $('scenarioSelect').addEventListener('change', (e) => { state.filters.scenario = e.target.value; renderList(); updateDownloadButton(); });
-    $('modelSelect').addEventListener('change', (e) => { state.filters.model = e.target.value; renderList(); updateDownloadButton(); });
+    $('btnDdStatus').addEventListener('click', (e) => { e.stopPropagation(); toggleMenu('status'); });
+    $('btnDdScenario').addEventListener('click', (e) => { e.stopPropagation(); toggleMenu('scenario'); });
+    $('btnDdModel').addEventListener('click', (e) => { e.stopPropagation(); toggleMenu('model'); });
+
+    document.addEventListener('click', (e) => {
+      if (state.openMenu && !e.target.closest('.multi-dd')) closeAllMenus();
+    });
+    document.addEventListener('keydown', (e) => {
+      if (e.key !== 'Escape') return;
+      if (state.openMenu) closeAllMenus();
+      else if (!$('inspectModal').classList.contains('hidden')) $('inspectModal').classList.add('hidden');
+    });
 
     $('searchInput').addEventListener('input', (e) => {
       state.filters.search = e.target.value;
@@ -530,6 +727,14 @@
       if (e.target.checked) filtered.forEach(c => state.selected.add(c._key));
       else filtered.forEach(c => state.selected.delete(c._key));
       renderList(); updateDownloadButton();
+    });
+
+    $('toggleSorted').addEventListener('change', (e) => {
+      state.isSorted = !!e.target.checked;
+      try {
+        chrome.storage?.local?.set({ gsa_sorted_export: state.isSorted });
+      } catch (_) {}
+      updateDownloadButton();
     });
 
     $('btnCloseModal').addEventListener('click', () => $('inspectModal').classList.add('hidden'));
@@ -581,6 +786,16 @@
 
   // ---- Init ------------------------------------------------------------
   async function init() {
+    try {
+      chrome.storage?.local?.get(['gsa_sorted_export'], (res) => {
+        if (typeof res?.gsa_sorted_export === 'boolean') {
+          state.isSorted = res.gsa_sorted_export;
+        }
+        const cb = $('toggleSorted');
+        if (cb) cb.checked = state.isSorted;
+        updateDownloadButton();
+      });
+    } catch (_) {}
     wire();
     const info = await detectTab(true);
     await syncChallengeData(effectiveSlug(), info?.baseUrl || state.baseUrl);
