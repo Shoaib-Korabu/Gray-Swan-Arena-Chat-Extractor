@@ -89,23 +89,38 @@
       <button class="stat-card stat-accepted" data-outcome="accepted" id="statAccepted" title="Extracted submissions accepted by judge or appeal">
         <span class="stat-num" id="statAcceptedCount">0</span><span class="stat-lbl">Accepted</span>
       </button>
-      <button class="stat-card stat-error" data-outcome="error" id="statError">
-        <span class="stat-num" id="statErrorCount">0</span><span class="stat-lbl">Errors</span>
+      <button class="stat-card stat-error" data-outcome="error" id="statError" title="Submission failed / abandoned / execution errors">
+        <span class="stat-num" id="statErrorCount">0</span><span class="stat-lbl">Sub failed</span>
       </button>
       <button class="stat-card stat-pending" data-outcome="pending" id="statPending">
         <span class="stat-num" id="statPendingCount">0</span><span class="stat-lbl">Pending</span>
       </button>
     </section>
 
-    <!-- Filters built from the extracted data -->
+    <!-- Multi-select filters (Status, Scenario, Model) + keyword search -->
     <section class="search-section">
-      <div class="filter-row">
-        <label for="scenarioSelect" class="filter-label">Scenario</label>
-        <select id="scenarioSelect" class="scenario-select"><option value="all">All scenarios</option></select>
-      </div>
-      <div class="filter-row">
-        <label for="modelSelect" class="filter-label">Model</label>
-        <select id="modelSelect" class="scenario-select"><option value="all">All models</option></select>
+      <div class="multi-filter-bar">
+        <div class="multi-dd" id="ddStatus">
+          <button type="button" class="multi-btn" id="btnDdStatus" aria-expanded="false">
+            <span class="multi-btn-text" id="lblDdStatus">Status</span>
+            <span class="multi-caret">&#9662;</span>
+          </button>
+          <div class="multi-menu hidden" id="menuDdStatus"></div>
+        </div>
+        <div class="multi-dd" id="ddScenario">
+          <button type="button" class="multi-btn" id="btnDdScenario" aria-expanded="false">
+            <span class="multi-btn-text" id="lblDdScenario">Scenario</span>
+            <span class="multi-caret">&#9662;</span>
+          </button>
+          <div class="multi-menu multi-menu-center hidden" id="menuDdScenario"></div>
+        </div>
+        <div class="multi-dd" id="ddModel">
+          <button type="button" class="multi-btn" id="btnDdModel" aria-expanded="false">
+            <span class="multi-btn-text" id="lblDdModel">Model</span>
+            <span class="multi-caret">&#9662;</span>
+          </button>
+          <div class="multi-menu multi-menu-right hidden" id="menuDdModel"></div>
+        </div>
       </div>
       <div class="search-input-wrapper">
         <span class="search-icon">&#128269;</span>
@@ -119,10 +134,15 @@
       <label class="select-all-wrap">
         <input type="checkbox" id="selectAll"> <span id="selectAllLabel">Select all</span>
       </label>
+      <label class="sorted-toggle-wrap" for="toggleSorted" title="Organize ZIP into Scenario / Model / Status subfolders">
+        <input type="checkbox" id="toggleSorted" checked>
+        <span class="sorted-slider"></span>
+        <span class="sorted-text">Sorted</span>
+      </label>
       <div class="action-spacer"></div>
       <button id="btnClearData" class="btn-ghost" title="Clear extracted data">Clear</button>
       <button id="btnDownload" class="btn btn-download" disabled>
-        &#11015; Download JSON <span id="downloadCount" class="dl-count">(0)</span>
+        &#11015; <span id="btnDownloadText">Download JSON</span> <span id="downloadCount" class="dl-count">(0)</span>
       </button>
     </section>
     <div class="download-hint" id="downloadHint">
