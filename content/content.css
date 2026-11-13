@@ -104,6 +104,81 @@
   font-size: 11px;
 }
 
+.gsa-drawer-sort-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: #060911;
+  border: 1px solid #1e293b;
+  border-radius: 6px;
+  padding: 6px 10px;
+}
+
+.gsa-sort-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.gsa-sort-cb {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+}
+
+.gsa-sort-slider {
+  width: 32px;
+  height: 18px;
+  background: #1e293b;
+  border-radius: 10px;
+  position: relative;
+  transition: background 0.2s, border-color 0.2s;
+  border: 1px solid #334155;
+  flex-shrink: 0;
+}
+
+.gsa-sort-slider::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 12px;
+  height: 12px;
+  background: #94a3b8;
+  border-radius: 50%;
+  transition: transform 0.2s, background 0.2s;
+}
+
+.gsa-sort-cb:checked + .gsa-sort-slider {
+  background: rgba(16, 185, 129, 0.25);
+  border-color: #10b981;
+}
+
+.gsa-sort-cb:checked + .gsa-sort-slider::after {
+  transform: translateX(14px);
+  background: #10b981;
+}
+
+.gsa-sort-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #f1f5f9;
+}
+
+.gsa-sort-cb:checked ~ .gsa-sort-label {
+  color: #a7f3d0;
+}
+
+.gsa-sort-desc {
+  font-size: 10px;
+  color: #94a3b8;
+  letter-spacing: 0.2px;
+}
+
 .gsa-drawer-actions {
   display: flex;
   flex-direction: column;
