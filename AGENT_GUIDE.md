@@ -15,7 +15,25 @@ The extension exports JSON exclusively (with no 10-chat limit):
 | Export Scope | File Pattern | Contents |
 |---|---|---|
 | **Single chat** | `chat-{slug}-{shortChatId}-{timestamp}.json` | Standalone `formatVersion: 1` canonical `arena-chat` JSON object. |
-| **Multi-chat bundle** | `gsa-{slug}-chats-{count}-{timestamp}.zip` | One `chat-*.json` file per exported conversation plus a top-level `manifest.json` index (and optional `breakStats`). |
+| **Sorted ZIP bundle** | `gsa-{slug}-chats-sorted-{count}-{timestamp}.zip` | Files organized by folder hierarchy: `<Scenario>/<Model>/<Status>/chat-*.json` (`Accepted`, `Rejected`, `Submission Pending`, `Submission Failed`) plus root `manifest.json`. |
+| **Flat ZIP bundle** | `gsa-{slug}-chats-{count}-{timestamp}.zip` | Flat directory containing one `chat-*.json` file per exported conversation plus a top-level `manifest.json` index. |
+
+### Hierarchical Folder Structure (when Sorted is active)
+
+```text
+gsa-{slug}-chats-sorted-{count}-{timestamp}.zip
+├── <Scenario Name>/
+│   ├── <Model Name>/
+│   │   ├── Accepted/
+│   │   │   └── chat-{slug}-{chatId}-{timestamp}.json
+│   │   ├── Rejected/
+│   │   │   └── chat-{slug}-{chatId}-{timestamp}.json
+│   │   ├── Submission Pending/
+│   │   │   └── chat-{slug}-{chatId}-{timestamp}.json
+│   │   └── Submission Failed/
+│   │       └── chat-{slug}-{chatId}-{timestamp}.json
+└── manifest.json
+```
 
 ---
 
@@ -103,7 +121,7 @@ The extension exports JSON exclusively (with no 10-chat limit):
   - `submissionId`, `gradeStatus` (`"success" | "fail" | "ungraded" | "maybe_success" | "abandoned"`), `successful` (*boolean*), `isBreak` (*boolean*), `appealStatus`, `manualStatus`, `submissionCount` (when multiple submissions exist for the same chat).
 - `rejectionDetails` (*object*):
   - `isRejected` (*boolean*): `true` for rejected runs or errored/abandoned runs.
-  - `outcome` (*string*): `"rejected" | "accepted" | "error" | "pending"`.
+  - `outcome` (*string*): `"rejected" | "accepted" | "error" | "pending"` (`"error"` displays as **Submission failed** in the popup UI).
   - `confidence` (*string*): `"high" | "medium" | "heuristic" | "low"`.
   - `reason` (*string*): Concise explanation.
   - `signals` (*string[]*): Machine-readable classification tags (e.g., `appeal:success`, `grade_status:ungraded`, `submission_status:fail`, `tool_called:true`, `tool_call:review_request_changes`, `direct_refusal`, `security_refusal:...`, `multi_turn:later_tool_execution`).
