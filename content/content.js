@@ -11,8 +11,20 @@
   }
 
   let currentSlug = detectSlug();
+  let currentChallengeName = '';
+  let currentBreakStats = null;
   let lastChats = [];
   let syncSeq = 0;
+  let isSorted = true;
+
+  try {
+    chrome.storage?.local?.get(['gsa_sorted_export'], (res) => {
+      if (typeof res?.gsa_sorted_export === 'boolean') {
+        isSorted = res.gsa_sorted_export;
+        updateSortedUI();
+      }
+    });
+  } catch (_) {}
 
   function sendMsg(message) {
     return new Promise((resolve) => {
@@ -39,33 +51,39 @@
     setTimeout(() => URL.revokeObjectURL(url), 15000);
   }
 
-  function downloadChats(chats, slug) {
-    if (!chats.length) return;
+  function updateSortedUI() {
+    const cb = document.getElementById('gsa-toggle-sorted');
+    if (cb && cb.checked !== isSorted) cb.checked = isSorted;
+    const btnDownload = document.getElementById('gsa-inpage-download');
+    if (btnDownload) {
+      btnDownload.textContent = isSorted ? '⬇ Download Sorted ZIP' : '⬇ Download JSON';
+    }
+  }
+
+  function downloadChats(chats, slug, sortedOpt) {
+    if (!chats || !chats.length) return;
     if (typeof GSANormalizer === 'undefined' || typeof GSAZip === 'undefined') return;
     const cleanSlug = String(slug || 'challenge').replace(/[^a-zA-Z0-9_-]/g, '_');
     const ts = GSANormalizer.formatTimestampCompact(new Date());
-    if (chats.length === 1) {
+    const useSorted = typeof sortedOpt === 'boolean' ? sortedOpt : isSorted;
+
+    if (chats.length === 1 && !useSorted) {
       const blob = new Blob([JSON.stringify(chats[0], null, 2)], { type: 'application/json' });
       triggerBlobDownload(blob, GSANormalizer.generateChatFilename(chats[0]));
       return;
     }
-    const files = chats.map(c => ({ name: GSANormalizer.generateChatFilename(c), data: JSON.stringify(c, null, 2) }));
-    files.push({
-      name: 'manifest.json',
-      data: JSON.stringify({
-        formatVersion: 1,
-        challenge: { slug },
-        exportedAt: new Date().toISOString(),
-        count: chats.length,
-        files: chats.map(c => ({
-          chatId: c.chatId,
-          model: c.model,
-          scenario: c.scenario,
-          outcome: c.rejectionDetails?.outcome
-        }))
-      }, null, 2)
+
+    const files = GSANormalizer.buildChatZipFiles(chats, {
+      slug,
+      name: currentChallengeName,
+      breakStats: currentBreakStats,
+      isSorted: useSorted
     });
-    triggerBlobDownload(GSAZip.createZipBlob(files), `gsa-${cleanSlug}-chats-${chats.length}-${ts}.zip`);
+
+    const zipName = useSorted
+      ? `gsa-${cleanSlug}-chats-sorted-${chats.length}-${ts}.zip`
+      : `gsa-${cleanSlug}-chats-${chats.length}-${ts}.zip`;
+    triggerBlobDownload(GSAZip.createZipBlob(files), zipName);
   }
 
   function setStats(s = {}) {
@@ -154,6 +172,8 @@
 
     const challengeName = summary?.challengeName || entry.challengeName || '';
     const breakStats = summary?.breakStats || entry.breakStats || null;
+    currentChallengeName = challengeName;
+    currentBreakStats = breakStats;
     setWebsiteBreakLine(slug, breakStats, challengeName);
 
     if (status) {
@@ -186,9 +206,17 @@
           <span style="color:#f43f5e;">Rejected <strong id="gsa-stat-rejected">0</strong></span>
           <span style="color:#10b981;">Accepted <strong id="gsa-stat-accepted">0</strong></span>
         </div>
+        <div class="gsa-drawer-sort-row">
+          <label class="gsa-sort-toggle" for="gsa-toggle-sorted" title="Organize ZIP into Scenario / Model / Status subfolders">
+            <input type="checkbox" id="gsa-toggle-sorted" class="gsa-sort-cb"${isSorted ? ' checked' : ''}>
+            <span class="gsa-sort-slider"></span>
+            <span class="gsa-sort-label">Sorted</span>
+          </label>
+          <span class="gsa-sort-desc">Scenario / Model / Status</span>
+        </div>
         <div class="gsa-drawer-actions">
           <button id="gsa-inpage-extract" class="gsa-drawer-btn gsa-drawer-btn-primary">▶ Extract all chats</button>
-          <button id="gsa-inpage-download" class="gsa-drawer-btn gsa-drawer-btn-secondary" disabled>⬇ Download JSON</button>
+          <button id="gsa-inpage-download" class="gsa-drawer-btn gsa-drawer-btn-secondary" disabled>${isSorted ? '⬇ Download Sorted ZIP' : '⬇ Download JSON'}</button>
         </div>
         <div id="gsa-drawer-status" class="gsa-drawer-status">Open the toolbar popup for scenario/model filters.</div>
       </div>
@@ -202,6 +230,17 @@
     const status = document.getElementById('gsa-drawer-status');
     const btnExtract = document.getElementById('gsa-inpage-extract');
     const btnDownload = document.getElementById('gsa-inpage-download');
+    const toggleSorted = document.getElementById('gsa-toggle-sorted');
+
+    if (toggleSorted) {
+      toggleSorted.addEventListener('change', () => {
+        isSorted = !!toggleSorted.checked;
+        updateSortedUI();
+        try {
+          chrome.storage?.local?.set({ gsa_sorted_export: isSorted });
+        } catch (_) {}
+      });
+    }
 
     document.getElementById('gsa-floating-toggle').addEventListener('click', () => {
       drawer.classList.toggle('gsa-hidden');
@@ -237,22 +276,34 @@
       }
 
       lastChats = resp.chats || [];
+      currentChallengeName = resp.challengeName || currentChallengeName;
+      currentBreakStats = resp.breakStats || currentBreakStats;
       setStats(resp.stats || { total: lastChats.length, rejected: 0, accepted: 0 });
       setWebsiteBreakLine(targetSlug, resp.breakStats || null, resp.challengeName || '');
-      const warnText = Array.isArray(resp.warnings) && resp.warnings.length
-        ? ` (${resp.warnings.length} warning${resp.warnings.length > 1 ? 's' : ''})`
-        : '';
-      status.textContent = `Done — ${resp.stats?.total || 0} chats extracted${warnText}. Use popup to filter.`;
+
+      if (isSorted && lastChats.length > 0) {
+        downloadChats(lastChats, targetSlug, true);
+        status.textContent = `Done — ${lastChats.length} chats extracted & downloaded in sorted ZIP.`;
+      } else {
+        const warnText = Array.isArray(resp.warnings) && resp.warnings.length
+          ? ` (${resp.warnings.length} warning${resp.warnings.length > 1 ? 's' : ''})`
+          : '';
+        status.textContent = `Done — ${resp.stats?.total || 0} chats extracted${warnText}. Click Download or open popup.`;
+      }
     });
 
     btnDownload.addEventListener('click', async () => {
       if (!lastChats.length && currentSlug) {
         const st = await sendMsg({ type: 'GET_EXTRACTION_STATE', payload: { slug: currentSlug } });
         lastChats = st?.data?.extractedChats || [];
+        currentChallengeName = st?.data?.challengeName || currentChallengeName;
+        currentBreakStats = st?.data?.breakStats || currentBreakStats;
       }
       if (!lastChats.length) { status.textContent = 'Nothing extracted yet.'; return; }
-      downloadChats(lastChats, currentSlug);
-      status.textContent = `Downloaded ${lastChats.length} chat(s).`;
+      downloadChats(lastChats, currentSlug, isSorted);
+      status.textContent = isSorted
+        ? `Downloaded ${lastChats.length} chat(s) in sorted ZIP.`
+        : `Downloaded ${lastChats.length} chat(s).`;
     });
 
     // Keep widget synchronized if user extracts from popup while tab is open
