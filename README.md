@@ -4,7 +4,9 @@ A Chrome (Manifest V3) extension that synchronizes live challenge state from **a
 
 ## What's new in v2.1.0
 
+- **Hierarchical Sorted ZIP Export:** Toggle **Sorted** (available in both the in-page widget and popup) to package downloads into structured folders: `<Scenario>/<Model>/<Status>/chat-*.json` (`Accepted`, `Rejected`, `Submission Pending`, `Submission Failed`). Root `manifest.json` tracks all files and metadata.
 - **Live Website Sync (`__data.json` + `/panels/*`):** Syncs challenge name, full scenario roster, full model roster (`model_id` / `classifier_id` / `wave` resolution), appeals, and exact **registered unique `(scenario, model)` break counts** directly from Gray Swan Arena — even before clicking Extract.
+- **Multi-Select Filters:** Dynamic `[Status ▾]`, `[Scenario ▾]`, and `[Model ▾]` multi-select checkbox menus matching the Gray Swan UI, synced with stat cards and live counts.
 - **Deduplicated Scenario & Model Filters:** Merges batch and direct chats using authoritative `behaviorIdToBehaviorMap` + `/panels/filter-options` + `/panels/batches` mappings so batch and unbatched chats collapse into the exact challenge scenario list (no split slug/name duplicates).
 - **Per-Challenge Storage Isolation & SPA Tracking:** Stores cached extractions per challenge slug (`extractionsBySlug`) and updates dynamically as you navigate between challenges in the Gray Swan Arena SPA.
 - **Accurate Verdict & Appeal Handling:** Distinguishes `grade_status: 'ungraded'` / `'maybe_success'` (`pending`), `'abandoned'` (`error`), `successful: false` (`rejected`), and appeal-won breaks (`accepted`); picks the winning or newest submission instead of overwriting newer submissions with older ones; avoids false rejections when multi-turn chats recover and call tools on a later turn.
@@ -21,9 +23,10 @@ A Chrome (Manifest V3) extension that synchronizes live challenge state from **a
 
 1. Open any challenge page on `*.grayswan.ai` (e.g., `/arena/challenge/lucky-break-payday` or `/arena/challenge/ipi-black-2026`).
 2. The in-page floating widget (`🦢 Extractor`) and toolbar popup immediately sync the challenge name, registered website breaks (unique `scenario × model` breaks and solved scenarios), and roster filters.
-3. Click **Extract chats** to paginate all chats and submissions, classify every conversation, and build filterable cards.
-4. Filter by outcome (`All` / `Rejected` / `Accepted` / `Errors` / `Pending`), scenario, model, or keyword; inspect full dialogue, tool summaries, reasoning traces, and classification signals in the modal.
-5. Click **Download JSON** to save one `.json` file (single chat) or a `.zip` bundle (multiple chats + `manifest.json`).
+3. Toggle **Sorted** (on by default) to automatically organize exports into `<Scenario>/<Model>/<Status>` folders.
+4. Click **Extract all chats** to extract and automatically download the sorted ZIP (or use popup filters for targeted subsets).
+5. Filter with multi-select **Status** (`All`, `Accepted`, `Pending`, `Rejected`, `Submission failed`), **Scenario**, and **Model** checkbox dropdowns, stat chips, or keyword search; inspect full dialogue, tool summaries, reasoning traces, and classification signals in the modal.
+6. Click **Download Sorted ZIP** to save the structured archive.
 
 ## Output schema
 
